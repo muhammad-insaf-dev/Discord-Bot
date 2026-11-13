@@ -4,6 +4,7 @@ import threading
 
 from flask import Flask
 import discord
+from discord import app_commands
 
 app = Flask(__name__)
 
@@ -26,8 +27,8 @@ def run_web_server():
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
+tree = app_commands.CommandTree(client)
 
-# Simple built-in chat replies. No AI/API key or paid service required.
 CHAT_REPLIES = [
     (("hi", "hello", "hey", "ഹായ്", "ഹലോ"), "ഹായ്! 😊 സുഖമാണോ? എന്ത് സഹായമാണ് വേണ്ടത്?"),
     (("how are you", "how r u", "സുഖമാണോ", "സുഖം ആണോ"), "എനിക്ക് സുഖം തന്നെ! 😄 നിങ്ങളോ?"),
@@ -45,7 +46,6 @@ CHAT_REPLIES = [
     (("😂", "🤣"), "ഹഹഹ! 😂"),
 ]
 
-# One active number game per Discord channel.
 number_games = {}
 MAX_TRIES = 3
 MIN_NUMBER = 1
@@ -62,130 +62,111 @@ def get_chat_reply(text):
 
 @client.event
 async def on_ready():
-    print(f"Logged in as {client.user}")
+    try:
+        synced = await tree.sync()
+        print(f"Logged in as {client.user}; synced {len(synced)} slash commands.")
+    except Exception as error:
+        print(f"Slash command sync failed: {error}")
 
 
 @client.event
 async def on_message(message):
     if message.author.bot:
         return
-
-    content = message.content.strip()
-    command = content.lower()
-
-    if command in ("!predict", "!number", "!numbergame"):
-        if message.channel.id in number_games:
-            await message.channel.send(
-                "A number game is already running here! "
-                "Guess with `!guess 1` to `!guess 10`."
-            )
-            return
-
-        number_games[message.channel.id] = {
-            "number": random.randint(MIN_NUMBER, MAX_NUMBER),
-            "tries": 0,
-            "player_id": message.author.id,
-        }
-        await message.channel.send(
-            f"🎯 **Number Prediction Game!**\n"
-            f"I picked a number from **{MIN_NUMBER} to {MAX_NUMBER}**.\n"
-            f"You have **{MAX_TRIES} tries**. Guess using `!guess 5`!"
-        )
-        return
-
-    if command.startswith("!guess"):
-        game = number_games.get(message.channel.id)
-        if game is None:
-            await message.channel.send("Start a game first with **!predict**.")
-            return
-
-        if message.author.id != game["player_id"]:
-            await message.channel.send("This game belongs to the player who started it.")
-            return
-
-        parts = content.split()
-        if len(parts) != 2:
-            await message.channel.send("Use this format: **!guess 5**")
-            return
-
-        try:
-            guess = int(parts[1])
-        except ValueError:
-            await message.channel.send("Please enter a whole number from 1 to 10.")
-            return
-
-        if not MIN_NUMBER <= guess <= MAX_NUMBER:
-            await message.channel.send("Choose a number from **1 to 10**.")
-            return
-
-        game["tries"] += 1
-        answer = game["number"]
-
-        if guess == answer:
-            del number_games[message.channel.id]
-            await message.channel.send(
-                f"🎉 **Correct!** The number was **{answer}**. "
-                f"You won in **{game['tries']}** attempt(s)!"
-            )
-        elif game["tries"] >= MAX_TRIES:
-            del number_games[message.channel.id]
-            await message.channel.send(
-                f"❌ Game over! The number was **{answer}**. Try again with **!predict**."
-            )
-        elif guess < answer:
-            await message.channel.send(
-                f"⬆️ Too low! Try a higher number. "
-                f"**{MAX_TRIES - game['tries']} tries left.**"
-            )
-        else:
-            await message.channel.send(
-                f"⬇️ Too high! Try a lower number. "
-                f"**{MAX_TRIES - game['tries']} tries left.**"
-            )
-        return
-
-    if command == "!stopguess":
-        game = number_games.get(message.channel.id)
-        if game is None:
-            await message.channel.send("There is no active number game here.")
-        elif message.author.id != game["player_id"]:
-            await message.channel.send("Only the player who started the game can stop it.")
-        else:
-            del number_games[message.channel.id]
-            await message.channel.send("🛑 Number game stopped.")
-        return
-
-    if command == "!ai" or command.startswith("!ai "):
-        prompt = content[3:].strip()
-        if not prompt:
-            await message.channel.send(
-                "ഹായ്! 😊 എനിക്ക് സാധാരണ ചോദ്യങ്ങൾ ചോദിക്കാം. "
-                "ഉദാ: `!ai how are you`, `!ai tell me a joke`"
-            )
-            return
-        reply = get_chat_reply(prompt)
-        if reply:
-            await message.channel.send(reply)
-        else:
-            await message.channel.send(
-                "ക്ഷമിക്കണം, ഈ ചോദ്യം എനിക്ക് അറിയില്ല. 🤔 "
-                "ഇപ്പോൾ എനിക്ക് സാധാരണ greetings-നും ചില ചോദ്യങ്ങൾക്കും മാത്രമാണ് മറുപടി നൽകാൻ കഴിയുക."
-            )
-        return
-
-    # Reply to common greetings/questions even without the !ai prefix.
-    reply = get_chat_reply(content)
+    reply = get_chat_reply(message.content.strip())
     if reply:
         await message.channel.send(reply)
 
 
+@tree.command(name="ai", description="Ask the bot a common question")
+@app_commands.describe(question="Type your question or greeting")
+async def ai(interaction: discord.Interaction, question: str):
+    reply = get_chat_reply(question)
+    if reply:
+        await interaction.response.send_message(reply)
+    else:
+        await interaction.response.send_message(
+            "ക്ഷമിക്കണം, ഈ ചോദ്യം എനിക്ക് അറിയില്ല. 🤔 "
+            "ഇപ്പോൾ സാധാരണ greetings-നും ചില ചോദ്യങ്ങൾക്കും മാത്രമാണ് മറുപടി നൽകാൻ കഴിയുക."
+        )
+
+
+@tree.command(name="predict", description="Start the number guessing game")
+async def predict(interaction: discord.Interaction):
+    channel_id = interaction.channel_id
+    if channel_id in number_games:
+        await interaction.response.send_message(
+            "A number game is already running here! Use /guess to guess."
+        )
+        return
+
+    number_games[channel_id] = {
+        "number": random.randint(MIN_NUMBER, MAX_NUMBER),
+        "tries": 0,
+        "player_id": interaction.user.id,
+    }
+    await interaction.response.send_message(
+        f"🎯 **Number Prediction Game!**\n"
+        f"I picked a number from **{MIN_NUMBER} to {MAX_NUMBER}**.\n"
+        f"You have **{MAX_TRIES} tries**. Use **/guess** and enter a number!"
+    )
+
+
+@tree.command(name="guess", description="Guess the number in the active game")
+@app_commands.describe(number="Choose a number from 1 to 10")
+async def guess(interaction: discord.Interaction, number: app_commands.Range[int, 1, 10]):
+    game = number_games.get(interaction.channel_id)
+    if game is None:
+        await interaction.response.send_message("Start a game first with /predict.")
+        return
+    if interaction.user.id != game["player_id"]:
+        await interaction.response.send_message(
+            "This game belongs to the player who started it.", ephemeral=True
+        )
+        return
+
+    game["tries"] += 1
+    answer = game["number"]
+    if number == answer:
+        del number_games[interaction.channel_id]
+        await interaction.response.send_message(
+            f"🎉 **Correct!** The number was **{answer}**. "
+            f"You won in **{game['tries']}** attempt(s)!"
+        )
+    elif game["tries"] >= MAX_TRIES:
+        del number_games[interaction.channel_id]
+        await interaction.response.send_message(
+            f"❌ Game over! The number was **{answer}**. Start again with /predict."
+        )
+    elif number < answer:
+        await interaction.response.send_message(
+            f"⬆️ Too low! Try a higher number. **{MAX_TRIES - game['tries']} tries left.**"
+        )
+    else:
+        await interaction.response.send_message(
+            f"⬇️ Too high! Try a lower number. **{MAX_TRIES - game['tries']} tries left.**"
+        )
+
+
+@tree.command(name="stopguess", description="Stop your active number guessing game")
+async def stopguess(interaction: discord.Interaction):
+    game = number_games.get(interaction.channel_id)
+    if game is None:
+        await interaction.response.send_message("There is no active number game here.")
+    elif interaction.user.id != game["player_id"]:
+        await interaction.response.send_message(
+            "Only the player who started the game can stop it.", ephemeral=True
+        )
+    else:
+        del number_games[interaction.channel_id]
+        await interaction.response.send_message("🛑 Number game stopped.")
+
+
 if __name__ == "__main__":
     token = os.environ.get("DISCORD_TOKEN")
-
     if not token:
         raise RuntimeError("DISCORD_TOKEN environment variable is not set.")
 
     web_thread = threading.Thread(target=run_web_server, daemon=True)
     web_thread.start()
-
     client.run(token)
