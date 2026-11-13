@@ -72,20 +72,15 @@ async def on_ready():
 
 @client.event
 async def on_member_join(member):
-    channel_id = os.environ.get("WELCOME_CHANNEL_ID")
-    if not channel_id:
-        print("WELCOME_CHANNEL_ID is not set; skipping welcome message.")
-        return
-
-    channel = member.guild.get_channel(int(channel_id))
+    channel = member.guild.system_channel
     if channel is None:
-        print(f"Welcome channel {channel_id} was not found in {member.guild.name}.")
+        print(f"No welcome channel configured for {member.guild.name}. Use /setwelcome.")
         return
 
     embed = discord.Embed(
         title=f"👋 Welcome to {member.guild.name}!",
         description=(
-            f"Hey {member.mention}! 💖\n"
+            f"Hey {member.mention}! 💖\\n"
             "We're happy to have you here. Make yourself at home! 🎉"
         ),
         color=discord.Color.green(),
@@ -114,6 +109,38 @@ async def ai(interaction: discord.Interaction, question: str):
         await interaction.response.send_message(
             "ക്ഷമിക്കണം, ഈ ചോദ്യം എനിക്ക് അറിയില്ല. 🤔 "
             "ഇപ്പോൾ സാധാരണ greetings-നും ചില ചോദ്യങ്ങൾക്കും മാത്രമാണ് മറുപടി നൽകാൻ കഴിയുക."
+        )
+
+
+@tree.command(name="setwelcome", description="Set this channel as the server welcome channel")
+@app_commands.guild_only()
+@app_commands.default_permissions(manage_guild=True)
+async def setwelcome(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_guild:
+        await interaction.response.send_message(
+            "❌ You need the Manage Server permission to set the welcome channel.",
+            ephemeral=True,
+        )
+        return
+
+    if not isinstance(interaction.channel, discord.TextChannel):
+        await interaction.response.send_message(
+            "❌ Please run this command in a text channel.",
+            ephemeral=True,
+        )
+        return
+
+    try:
+        await interaction.guild.edit(system_channel=interaction.channel)
+        await interaction.response.send_message(
+            f"✅ {interaction.channel.mention} is now the welcome channel! "
+            "New members will receive the welcome message here. 👋",
+            ephemeral=True,
+        )
+    except discord.Forbidden:
+        await interaction.response.send_message(
+            "❌ I don't have permission to update the server's welcome channel.",
+            ephemeral=True,
         )
 
 
