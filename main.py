@@ -4,6 +4,7 @@ import threading
 
 from flask import Flask
 import discord
+from openai import AsyncOpenAI
 
 app = Flask(__name__)
 
@@ -28,11 +29,31 @@ intents.message_content = True
 
 client = discord.Client(intents=intents)
 
+# OpenAI is enabled when OPENAI_API_KEY is configured in Render.
+openai_client = (
+    AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    if os.environ.get("OPENAI_API_KEY")
+    else None
+)
+ai_histories = {}
+AI_MODEL = "gpt-4.1-mini"
+AI_SYSTEM_PROMPT = (
+    "You are a friendly, helpful Discord assistant. "
+    "You can understand and reply in Malayalam, Manglish, English, and other languages. "
+    "Reply in the language the user uses. Keep replies clear and concise."
+)
+
 # One active number game per Discord channel.
 number_games = {}
 MAX_TRIES = 3
 MIN_NUMBER = 1
 MAX_NUMBER = 10
+
+
+async def send_long_message(channel, text):
+    # Discord messages have a 2000-character limit.
+    for start in range(0, len(text), 1900):
+        await channel.send(text[start:start + 1900])
 
 
 @client.event
@@ -132,6 +153,53 @@ async def on_message(message):
         else:
             del number_games[message.channel.id]
             await message.channel.send("🛑 Number game stopped.")
+        return
+
+    if command == "!aireset":
+        ai_histories.pop((message.channel.id, message.author.id), None)
+        await message.channel.send("🧹 Your AI chat history has been cleared.")
+        return
+
+    if command == "!ai" or command.startswith("!ai "):
+        if openai_client is None:
+            await message.channel.send(
+                "⚙️ AI chat is not configured yet. The bot owner must add "
+                "OPENAI_API_KEY in Render Environment settings."
+            )
+            return
+
+        prompt = content[3:].strip()
+        if not prompt:
+            await message.channel.send(
+                "Ask me something! Example: `!ai കേരളത്തിന്റെ തലസ്ഥാനം ഏതാണ്?`"
+            )
+            return
+
+        history_key = (message.channel.id, message.author.id)
+        history = ai_histories.setdefault(
+            history_key, [{"role": "system", "content": AI_SYSTEM_PROMPT}]
+        )
+        history.append({"role": "user", "content": prompt})
+        # Keep the system prompt and the latest 12 conversation messages.
+        history[:] = [history[0]] + history[-12:]
+
+        async with message.channel.typing():
+            try:
+                response = await openai_client.chat.completions.create(
+                    model=AI_MODEL,
+                    messages=history,
+                    max_tokens=500,
+                )
+                answer = response.choices[0].message.content or "I couldn't create a reply."
+                history.append({"role": "assistant", "content": answer})
+                await send_long_message(message.channel, answer)
+            except Exception:
+                # Do not expose API keys or internal error details in Discord.
+                if history and history[-1]["role"] == "user":
+                    history.pop()
+                await message.channel.send(
+                    "⚠️ AI reply failed. Please try again in a moment."
+                )
         return
 
 
