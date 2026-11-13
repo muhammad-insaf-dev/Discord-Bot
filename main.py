@@ -91,6 +91,15 @@ async def ai(interaction: discord.Interaction, question: str):
         )
 
 
+@tree.command(name="coinflip", description="Flip a coin and get heads or tails")
+async def coinflip(interaction: discord.Interaction):
+    result = random.choice(("Heads", "Tails"))
+    emoji = "🪙"
+    await interaction.response.send_message(
+        f"{emoji} **Coin flipped!**\nThe result is: **{result}**!"
+    )
+
+
 @tree.command(name="predict", description="Start the number guessing game")
 async def predict(interaction: discord.Interaction):
     channel_id = interaction.channel_id
