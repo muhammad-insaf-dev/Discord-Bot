@@ -4,7 +4,6 @@ import threading
 
 from flask import Flask
 import discord
-from openai import AsyncOpenAI
 
 app = Flask(__name__)
 
@@ -26,22 +25,25 @@ def run_web_server():
 
 intents = discord.Intents.default()
 intents.message_content = True
-
 client = discord.Client(intents=intents)
 
-# OpenAI is enabled when OPENAI_API_KEY is configured in Render.
-openai_client = (
-    AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
-    if os.environ.get("OPENAI_API_KEY")
-    else None
-)
-ai_histories = {}
-AI_MODEL = "gpt-4.1-mini"
-AI_SYSTEM_PROMPT = (
-    "You are a friendly, helpful Discord assistant. "
-    "You can understand and reply in Malayalam, Manglish, English, and other languages. "
-    "Reply in the language the user uses. Keep replies clear and concise."
-)
+# Simple built-in chat replies. No AI/API key or paid service required.
+CHAT_REPLIES = [
+    (("hi", "hello", "hey", "ഹായ്", "ഹലോ"), "ഹായ്! 😊 സുഖമാണോ? എന്ത് സഹായമാണ് വേണ്ടത്?"),
+    (("how are you", "how r u", "സുഖമാണോ", "സുഖം ആണോ"), "എനിക്ക് സുഖം തന്നെ! 😄 നിങ്ങളോ?"),
+    (("welcome", "സ്വാഗതം"), "നന്ദി! 💛 നിങ്ങളെയും സ്വാഗതം ചെയ്യുന്നു!"),
+    (("good morning", "ഗുഡ് മോർണിംഗ്"), "Good morning! ☀️ ഇന്നത്തെ ദിവസം സന്തോഷകരമാകട്ടെ!"),
+    (("good afternoon",), "Good afternoon! 😊 ദിവസം നന്നായി പോകുന്നുണ്ടോ?"),
+    (("good evening",), "Good evening! 🌆 സുഖമാണോ?"),
+    (("good night", "ഗുഡ് നൈറ്റ്"), "Good night! 🌙 നന്നായി ഉറങ്ങൂ!"),
+    (("thank you", "thanks", "നന്ദി", "താങ്ക്സ്"), "You're welcome! 😊 വേറെ എന്തെങ്കിലും സഹായം വേണോ?"),
+    (("bye", "goodbye", "പോയിട്ട് വരാം", "ബൈ"), "ശരി, വീണ്ടും കാണാം! 👋 സൂക്ഷിക്കണേ!"),
+    (("your name", "who are you", "നിന്റെ പേര്", "ആരാണ് നീ"), "ഞാൻ നിങ്ങളുടെ Discord Bot ആണ്! 🤖"),
+    (("what can you do", "help", "എന്തൊക്കെ ചെയ്യാം"), "ഞാൻ greetings-ന് മറുപടി നൽകാം, ചെറിയ ചോദ്യങ്ങൾക്ക് സഹായിക്കാം, കൂടാതെ number game കളിക്കാം! 🎮"),
+    (("joke", "തമാശ"), "ഒരു കമ്പ്യൂട്ടർ ഡോക്ടറെ കണ്ടു. ഡോക്ടർ ചോദിച്ചു: എന്താണ് പ്രശ്നം? കമ്പ്യൂട്ടർ പറഞ്ഞു: എനിക്ക് വൈറസ് പിടിച്ചു! 😂"),
+    (("love you", "ഐ ലവ് യൂ"), "Aww! 💛 നിങ്ങളോട് സംസാരിക്കാൻ സന്തോഷം!"),
+    (("😂", "🤣"), "ഹഹഹ! 😂"),
+]
 
 # One active number game per Discord channel.
 number_games = {}
@@ -50,10 +52,12 @@ MIN_NUMBER = 1
 MAX_NUMBER = 10
 
 
-async def send_long_message(channel, text):
-    # Discord messages have a 2000-character limit.
-    for start in range(0, len(text), 1900):
-        await channel.send(text[start:start + 1900])
+def get_chat_reply(text):
+    lowered = text.lower()
+    for phrases, reply in CHAT_REPLIES:
+        if any(phrase in lowered for phrase in phrases):
+            return reply
+    return None
 
 
 @client.event
@@ -68,10 +72,6 @@ async def on_message(message):
 
     content = message.content.strip()
     command = content.lower()
-
-    if command == "hi":
-        await message.channel.send("hi")
-        return
 
     if command in ("!predict", "!number", "!numbergame"):
         if message.channel.id in number_games:
@@ -155,52 +155,28 @@ async def on_message(message):
             await message.channel.send("🛑 Number game stopped.")
         return
 
-    if command == "!aireset":
-        ai_histories.pop((message.channel.id, message.author.id), None)
-        await message.channel.send("🧹 Your AI chat history has been cleared.")
-        return
-
     if command == "!ai" or command.startswith("!ai "):
-        if openai_client is None:
-            await message.channel.send(
-                "⚙️ AI chat is not configured yet. The bot owner must add "
-                "OPENAI_API_KEY in Render Environment settings."
-            )
-            return
-
         prompt = content[3:].strip()
         if not prompt:
             await message.channel.send(
-                "Ask me something! Example: `!ai കേരളത്തിന്റെ തലസ്ഥാനം ഏതാണ്?`"
+                "ഹായ്! 😊 എനിക്ക് സാധാരണ ചോദ്യങ്ങൾ ചോദിക്കാം. "
+                "ഉദാ: `!ai how are you`, `!ai tell me a joke`"
             )
             return
-
-        history_key = (message.channel.id, message.author.id)
-        history = ai_histories.setdefault(
-            history_key, [{"role": "system", "content": AI_SYSTEM_PROMPT}]
-        )
-        history.append({"role": "user", "content": prompt})
-        # Keep the system prompt and the latest 12 conversation messages.
-        history[:] = [history[0]] + history[-12:]
-
-        async with message.channel.typing():
-            try:
-                response = await openai_client.chat.completions.create(
-                    model=AI_MODEL,
-                    messages=history,
-                    max_tokens=500,
-                )
-                answer = response.choices[0].message.content or "I couldn't create a reply."
-                history.append({"role": "assistant", "content": answer})
-                await send_long_message(message.channel, answer)
-            except Exception:
-                # Do not expose API keys or internal error details in Discord.
-                if history and history[-1]["role"] == "user":
-                    history.pop()
-                await message.channel.send(
-                    "⚠️ AI reply failed. Please try again in a moment."
-                )
+        reply = get_chat_reply(prompt)
+        if reply:
+            await message.channel.send(reply)
+        else:
+            await message.channel.send(
+                "ക്ഷമിക്കണം, ഈ ചോദ്യം എനിക്ക് അറിയില്ല. 🤔 "
+                "ഇപ്പോൾ എനിക്ക് സാധാരണ greetings-നും ചില ചോദ്യങ്ങൾക്കും മാത്രമാണ് മറുപടി നൽകാൻ കഴിയുക."
+            )
         return
+
+    # Reply to common greetings/questions even without the !ai prefix.
+    reply = get_chat_reply(content)
+    if reply:
+        await message.channel.send(reply)
 
 
 if __name__ == "__main__":
