@@ -26,6 +26,7 @@ def run_web_server():
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
@@ -70,6 +71,31 @@ async def on_ready():
 
 
 @client.event
+async def on_member_join(member):
+    channel_id = os.environ.get("WELCOME_CHANNEL_ID")
+    if not channel_id:
+        print("WELCOME_CHANNEL_ID is not set; skipping welcome message.")
+        return
+
+    channel = member.guild.get_channel(int(channel_id))
+    if channel is None:
+        print(f"Welcome channel {channel_id} was not found in {member.guild.name}.")
+        return
+
+    embed = discord.Embed(
+        title=f"👋 Welcome to {member.guild.name}!",
+        description=(
+            f"Hey {member.mention}! 💖\n"
+            "We're happy to have you here. Make yourself at home! 🎉"
+        ),
+        color=discord.Color.green(),
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.set_footer(text=f"Member #{member.guild.member_count}")
+    await channel.send(embed=embed)
+
+
+@client.event
 async def on_message(message):
     if message.author.bot:
         return
@@ -89,6 +115,21 @@ async def ai(interaction: discord.Interaction, question: str):
             "ക്ഷമിക്കണം, ഈ ചോദ്യം എനിക്ക് അറിയില്ല. 🤔 "
             "ഇപ്പോൾ സാധാരണ greetings-നും ചില ചോദ്യങ്ങൾക്കും മാത്രമാണ് മറുപടി നൽകാൻ കഴിയുക."
         )
+
+
+@tree.command(name="welcome", description="Preview the server welcome message")
+async def welcome(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title=f"👋 Welcome to {interaction.guild.name}!",
+        description=(
+            f"Hey {interaction.user.mention}! 💖\\n"
+            "We're happy to have you here. Make yourself at home! 🎉"
+        ),
+        color=discord.Color.green(),
+    )
+    embed.set_thumbnail(url=interaction.user.display_avatar.url)
+    embed.set_footer(text=f"Member #{interaction.guild.member_count}")
+    await interaction.response.send_message(embed=embed)
 
 
 @tree.command(name="coinflip", description="Flip a coin and get heads or tails")
