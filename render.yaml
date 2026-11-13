@@ -2,8 +2,11 @@ services:
   - type: web
     name: discord-hi-bot
     runtime: python
+    plan: free
+    region: singapore
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py
+    healthCheckPath: /health
     envVars:
       - key: DISCORD_TOKEN
         sync: false
